@@ -56,9 +56,11 @@ function Start()
 
     startTime = time()
 	debug.sethook(_profiler_hook, 'cr')
+    running = true
 end
 
 function Stop()
+    running = false
     debug.sethook(nil)
 
     WARN("Stopped profiler after at " .. tostring(time() - startTime))

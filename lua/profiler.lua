@@ -10,7 +10,15 @@ local recordBuffer = {}
 local startTime
 
 -- Avoid profiling the profiler
-local blacklist = { }
+local blacklist = {}
+
+-- Maps toplevel functions to thread identifiers.
+local threadIds = {}
+
+-- Maps thread ids to clock drifts.
+local threadDrifts = {}
+
+local current
 
 local time = nil
 
@@ -27,6 +35,20 @@ local function _profiler_hook(action)
     if blacklist[caller_info.func] then
         return
     end
+
+    if caller_info.func == coroutine.yield then
+        WARN("Yield!")
+        if action ~= "return" then
+            -- About to context switch.
+
+        else
+            -- Context switch complete.
+
+        end
+
+        return
+    end
+
 
     -- Find or generate function id for this function.
     local methodId = methodMap[caller_info.func]
@@ -103,32 +125,15 @@ function PrettyName(func)
 end
 
 function CreateProgressBar()
-    local Popup = import('/mods/profiler/lua/popup.lua').Popup
-    local Group = import('/lua/maui/group.lua').Group
     local StatusBar = import('/lua/maui/statusbar.lua').StatusBar
-    local LayoutHelpers = import('/lua/maui/layouthelpers.lua')
-    local UIUtil = import('/lua/ui/uiutil.lua')
-
-    local dialogContent = Group(GetFrame(0))
-    dialogContent.Width:Set(600)
-    dialogContent.Height:Set(100)
-
-    -- Make an uncloseable popup.
-    local popup = Popup(GetFrame(0), dialogContent)
-    popup.Close = function() end
-
-    local title = UIUtil.CreateText(dialogContent, "Saving profiler data...", 16, UIUtil.bodyFont)
-    LayoutHelpers.AtTopIn(title, dialogContent)
-    LayoutHelpers.AtHorizontalCenterIn(title, dialogContent)
-    group.Height:Set(function() return group.title.Height() + 4 end)
 
     local progressBar = StatusBar(dialogContent, 0, 100, false, false,
         UIUtil.UIFile('/game/resource-mini-bars/mini-energy-bar-back_bmp.dds'),
         UIUtil.UIFile('/game/resource-mini-bars/mini-energy-bar_bmp.dds'), false)
 
-    progressBar.Width:Set(function() return dialogContent.Width() - 20 end)
+    progressBar.Width:Set(600)
 
-    LayoutHelpers.AtCenterIn(progressBar, dialogContent)
+    LayoutHelpers.AtCenterIn(progressBar, GetFrame(0))
 
     return progressBar
 end

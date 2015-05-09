@@ -108,11 +108,20 @@ function CreateProgressBar()
     dialogContent.Width:Set(600)
     dialogContent.Height:Set(100)
 
-    Popup(GetFrame(0), dialogContent)
+    -- Make an uncloseable popup.
+    local popup = Popup(GetFrame(0), dialogContent)
+    popup.Close = function() end
+
+    local title = UIUtil.CreateText(dialogContent, "Saving profiler data...", 16, UIUtil.bodyFont)
+    LayoutHelpers.AtTopIn(title, dialogContent)
+    LayoutHelpers.AtHorizontalCenterIn(title, dialogContent)
+    group.Height:Set(function() return group.title.Height() + 4 end)
 
     local progressBar = StatusBar(dialogContent, 0, 100, false, false,
         UIUtil.UIFile('/game/resource-mini-bars/mini-energy-bar-back_bmp.dds'),
         UIUtil.UIFile('/game/resource-mini-bars/mini-energy-bar_bmp.dds'), false)
+
+    progressBar.Width:Set(function() return dialogContent.Width() - 20 end)
 
     LayoutHelpers.AtCenterIn(progressBar, dialogContent)
 

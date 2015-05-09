@@ -87,7 +87,7 @@ function Toggle()
 end
 
 local FORMAT_FUNCNAME = '%s	L%03d:%s'
-local function PrettyName(func)
+function PrettyName(func)
     local className
     if func.what == "C" then
         className = "Native"

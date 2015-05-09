@@ -39,9 +39,17 @@ local function _profiler_hook(action)
     end
 
     if caller_info.func == coroutine.yield then
+        for i = 1, 64 do
+            local k, v = debug.getlocal(2, i)
+            if k then
+                WARN('coroutine.yield locals: '..k..' = '..tostring(v))
+                break
+            end
+        end
+
         if action ~= "return" then
             -- Context switch started.
-            thread_yield_times[current_thread] = time()
+            thread_yield_times[current_thread] = eventTime
         else
             -- Context switch complete.
             local info
@@ -62,12 +70,19 @@ local function _profiler_hook(action)
                 threads[top_info.func] = current_thread
                 thread_drifts[current_thread] = 0
             else
+                if not thread_yield_times[current_thread] then
+                    WARN('BAD THREAD: '..tostring(current_thread))
+                end
                 thread_drifts[current_thread] = 
                     thread_drifts[current_thread] + 
-                    time() - thread_yield_times[current_thread]
+                    eventTime - thread_yield_times[current_thread]
             end
         end
         return
+    end
+
+    if caller_info.func == coroutine.resume then
+        WARN('Coroutine resume called by '..tostring(current_thread))
     end
 
 
@@ -95,6 +110,25 @@ local function _profiler_hook(action)
 end
 
 function Start()
+    if running then
+        WARN('Profiler already running.')
+        return
+    end
+
+    running = true
+
+    -- Reinitialize all data structures so we can be reused.
+    methodMap = {}
+    methodInfoMap = {}
+    methodIdCounter = 0
+    recordBuffer = {}
+
+    threads = {}
+    thread_id_counter = 2
+
+    thread_drifts = {}
+    thread_yield_times = {}
+
     -- Fairly hacky, but these need to be sim-side
     time = GetSystemTimeSecondsOnlyForProfileUse
     blacklist[GetSystemTimeSecondsOnlyForProfileUse] = true
@@ -104,8 +138,8 @@ function Start()
     current_thread = 1
     thread_drifts[current_thread] = 0
     startTime = time()
+
 	debug.sethook(_profiler_hook, 'cr')
-    running = true
 end
 
 function Stop()
@@ -125,6 +159,18 @@ function Stop()
         outputBuffer = recordBuffer,
         startTime = startTime
     }
+
+    -- Clean up so we don't use unnecessary memory.
+    methodMap = {}
+    methodInfoMap = {}
+    methodIdCounter = 0
+    recordBuffer = {}
+
+    threads = {}
+    thread_id_counter = 2
+
+    thread_drifts = {}
+    thread_yield_times = {}
 end
 
 function Toggle()

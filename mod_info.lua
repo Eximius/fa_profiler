@@ -1,10 +1,10 @@
-name = "Chess"
+name = "Profiler"
 version = 1
-copyright = "Copyright © 2007, Gas Powered Games"
-description = "All units in play is all you've got. Now go hunt!"
-author = "Daniel Teh - Gas Powered Games"
-url = "http://www.gaspoweredgames.com"
-uid = "6EAA2403-27A8-47ee-B4DF-5017E056E501"
+copyright = "WTFPL"
+description = "An instrumenting profiler for the sim lua"
+author = "Chris Kitching & Eximius"
+url = "https://github.com/FAForever"
+uid = "e2b55050-f63a-11e4-b9b2-1697f925ec7b"
 
 exclusive = false
 ui_only = false

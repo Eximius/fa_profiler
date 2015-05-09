@@ -1,5 +1,6 @@
 local baseOnFirstUpdate = OnFirstUpdate
 function OnFirstUpdate()
+	baseOnFirstUpdate()
 	if not CheatsEnabled() then
 		WARN('You have to have cheats enabled to use the profiler.')
 	else

@@ -19,6 +19,8 @@ local thread_id_counter
 -- Maps thread ids to clock drifts.
 local thread_drifts
 local thread_yield_times
+local thread_yield_junk
+local thread_tail_calls
 
 local current_thread
 
@@ -30,15 +32,34 @@ function Reset()
     recordBuffer = {}
 
     threads = {}
-    thread_id_counter = 2
+    thread_id_counter = 1
 
     thread_drifts = {}
     thread_yield_times = {}
+    thread_yield_junk = false
+end
+
+local function InitCurrentThread(thread_top_func_info)
+    current_thread = thread_id_counter
+    thread_id_counter = thread_id_counter + 1
+    threads[thread_top_func_info.func] = current_thread
+    thread_drifts[current_thread] = 0
+end
+
+local function PutRecord(thread_id, method_id, action, event_time)
+    table.insert(recordBuffer, thread_id)
+    table.insert(recordBuffer, method_id)
+    table.insert(recordBuffer, action)
+    table.insert(recordBuffer, event_time)
 end
 
 local time = nil
 
 local function _profiler_hook(action)
+    if thread_yield_junk then
+        thread_yield_junk = false
+        return
+    end
     local eventTime = time()
     -- Output format:
     -- Method id, Method action, delta since start.
@@ -72,10 +93,7 @@ local function _profiler_hook(action)
 
             current_thread = threads[top_info.func]
             if not current_thread then
-                current_thread = thread_id_counter
-                thread_id_counter = thread_id_counter + 1
-                threads[top_info.func] = current_thread
-                thread_drifts[current_thread] = 0
+                InitCurrentThread(top_info)
             else
                 if not thread_yield_times[current_thread] then
                     WARN('BAD THREAD: '..tostring(current_thread))
@@ -84,6 +102,7 @@ local function _profiler_hook(action)
                     thread_drifts[current_thread] + 
                     eventTime - thread_yield_times[current_thread]
             end
+            thread_yield_junk = true
         end
         return
     end
@@ -94,10 +113,7 @@ local function _profiler_hook(action)
 
     if not current_thread then
         -- Assume thread was just started
-        current_thread = thread_id_counter
-        thread_id_counter = thread_id_counter + 1
-        threads[caller_info.func] = current_thread
-        thread_drifts[current_thread] = 0
+        InitCurrentThread(caller_info)
     end
 
     -- Find or generate function id for this function.
@@ -109,18 +125,17 @@ local function _profiler_hook(action)
         methodInfoMap[caller_info.func] = caller_info
     end
 
-    -- 0 for call, 1 for return, as per traceview.
-    local actionCode = 1
-    if action ~= "return" then
-        actionCode = 0
-    end
+    eventTime = eventTime - thread_drifts[current_thread]
+    if action == 'call' then
+        PutRecord(current_thread, methodId, 0, eventTime)
+    elseif action == 'return' or action == 'tail return' then
+        PutRecord(current_thread, methodId, 1, eventTime)
 
-    -- Insert a traceview-ish record for this event into the output buffer.
-    -- Linked-list used to further reduce overhead. Muwhaha.
-    table.insert(recordBuffer, current_thread)
-    table.insert(recordBuffer, methodId)
-    table.insert(recordBuffer, actionCode)
-    table.insert(recordBuffer, eventTime - thread_drifts[current_thread])
+        if current_thread == 1 and not debug.getinfo(3) then
+            -- Special case main terminating
+            current_thread = nil
+        end
+    end
 end
 
 function Start()
@@ -140,8 +155,7 @@ function Start()
 
 	LOG('Starting profiler at ' .. tostring(time()))
 
-    current_thread = 1
-    thread_drifts[current_thread] = 0
+    InitCurrentThread({name = 'main', func = 'main'})
     startTime = time()
 
 	debug.sethook(_profiler_hook, 'cr')
@@ -281,3 +295,6 @@ blacklist[PrettyName] = true
 blacklist[debug.sethook] = true
 blacklist[debug.getinfo] = true
 blacklist[Toggle] = true
+
+blacklist[InitCurrentThread] = true
+blacklist[PutRecord] = true

@@ -52,7 +52,7 @@ local function _profiler_hook(action)
 end
 
 function Start()
-	LOG('Starting profiler at '+tostring(time()))
+	LOG('Starting profiler at ' .. tostring(time()))
 
     startTime = time()
 	debug.sethook(_profiler_hook, 'cr')
@@ -61,7 +61,7 @@ end
 function Stop()
     debug.sethook(nil)
 
-    WARN("Stopped profiler after at " + tostring(time() - startTime))
+    WARN("Stopped profiler after at " .. tostring(time() - startTime))
     -- Remove the references to func objects: this kills the Sync table.
     local stringMethodMap = {}
     for k, v in methodMap do

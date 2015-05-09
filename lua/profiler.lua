@@ -188,3 +188,5 @@ blacklist[_profiler_hook] = true
 blacklist[SendReport] = true
 blacklist[PrettyName] = true
 blacklist[GetSystemTimeSecondsOnlyForProfileUse] = true
+blacklist[debug.sethook] = true
+blacklist[debug.getinfo] = true

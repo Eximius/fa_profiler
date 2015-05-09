@@ -133,7 +133,6 @@ function Start()
 
     -- Fairly hacky, but these need to be sim-side
     time = GetSystemTimeSecondsOnlyForProfileUse
-    blacklist[GetSystemTimeSecondsOnlyForProfileUse] = true
 
 	LOG('Starting profiler at ' .. tostring(time()))
 
@@ -286,3 +285,5 @@ blacklist[SendReport] = true
 blacklist[PrettyName] = true
 blacklist[debug.sethook] = true
 blacklist[debug.getinfo] = true
+blacklist[GetSystemTimeSecondsOnlyForProfileUse] = true
+blacklist[Toggle] = true

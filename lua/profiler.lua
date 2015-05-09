@@ -37,15 +37,10 @@ local function _profiler_hook(action)
     end
 
     if caller_info.func == coroutine.yield then
-        WARN("Yield!")
-        if action ~= "return" then
-            -- About to context switch.
-
-        else
+        if action == "return" then
             -- Context switch complete.
 
         end
-
         return
     end
 
@@ -125,17 +120,29 @@ function PrettyName(func)
 end
 
 function CreateProgressBar()
+    local UIUtil = import('/lua/ui/uiutil.lua')
+    local Group = import('/lua/maui/group.lua').Group
+    local LayoutHelpers = import('/lua/maui/layouthelpers.lua')
     local StatusBar = import('/lua/maui/statusbar.lua').StatusBar
 
-    local progressBar = StatusBar(dialogContent, 0, 100, false, false,
+    local group = Group(GetFrame(0), 'Profiler')
+
+    local title = UIUtil.CreateText(group, "Dumping profiler data.", 24)
+    LayoutHelpers.AtTopIn(title, GetFrame(0), 100)
+    LayoutHelpers.AtHorizontalCenterIn(title, GetFrame(0))
+
+    local progressBar = StatusBar(group, 0, 100, false, false,
         UIUtil.UIFile('/game/resource-mini-bars/mini-energy-bar-back_bmp.dds'),
         UIUtil.UIFile('/game/resource-mini-bars/mini-energy-bar_bmp.dds'), false)
 
-    progressBar.Width:Set(600)
+    progressBar.Width:Set(300)
 
-    LayoutHelpers.AtCenterIn(progressBar, GetFrame(0))
+    LayoutHelpers.Below(progressBar, title)
+    LayoutHelpers.AtHorizontalCenterIn(progressBar, GetFrame(0))
 
-    return progressBar
+    -- LayoutHelpers.AtCenterIn(group, GetFrame(0))
+
+    return group, progressBar
 end
 
 -- Write the profile... to the preferences file. Sanity not included.
@@ -164,7 +171,7 @@ function SendReport(report)
 
     local i = 1
     local lastProgress = 0
-    local progressBar = CreateProgressBar()
+    local progressGroup, progressBar = CreateProgressBar()
 
     while i < length - 12 do
         GpgNetSend('FWrite', 2,
@@ -176,7 +183,7 @@ function SendReport(report)
 
         i = i + 12
 
-        if lastProgress < math.floor(i / (length / 100)) then
+        if lastProgress < math.floor(i / (length / 300)) then
             lastProgress = lastProgress + 1
             progressBar:SetValue(lastProgress)
             WaitSeconds(0)
@@ -189,7 +196,10 @@ function SendReport(report)
 
     GpgNetSend('FClose', 2)
 
+    progressGroup:Destroy()
+
     WARN("Output complete")
+
 end
 
 blacklist[Start] = true

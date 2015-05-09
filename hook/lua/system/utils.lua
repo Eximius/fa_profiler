@@ -6,7 +6,7 @@ function ForkThread(foo, ...)
 	local foo = foo
 	local args = arg
 
-	local bar = function()
+	local function bar()
 		foo(unpack(args))
 	end
 	return baseForkThread(bar)

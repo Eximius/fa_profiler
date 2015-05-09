@@ -53,19 +53,10 @@ local function _profiler_hook(action)
     end
 
     if caller_info.func == coroutine.yield then
-
-        for i = -64, 64 do
-            local info = debug.getinfo(2)
-
-            local k, v = debug.getlocal(2, i)
-            if k then
-                WARN((info.name or info.what) .. ' locals: '..k..' = '..tostring(v))
-            end
-        end
-
         if action ~= "return" then
             -- Context switch started.
             thread_yield_times[current_thread] = eventTime
+            current_thread = nil
         else
             -- Context switch complete.
             local info
@@ -101,6 +92,13 @@ local function _profiler_hook(action)
         WARN('Coroutine resume called by '..tostring(current_thread))
     end
 
+    if not current_thread then
+        -- Assume thread was just started
+        current_thread = thread_id_counter
+        thread_id_counter = thread_id_counter + 1
+        threads[caller_info.func] = current_thread
+        thread_drifts[current_thread] = 0
+    end
 
     -- Find or generate function id for this function.
     local methodId = methodMap[caller_info.func]

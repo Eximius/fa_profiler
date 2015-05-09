@@ -13,12 +13,14 @@ local startTime
 local blacklist = {}
 
 -- Maps toplevel functions to thread identifiers.
-local threadIds = {}
+local threads = {}
+local thread_id_counter = 2
 
 -- Maps thread ids to clock drifts.
-local threadDrifts = {}
+local thread_drifts = {}
+local thread_yield_times = {}
 
-local current
+local current_thread
 
 local time = nil
 
@@ -37,9 +39,33 @@ local function _profiler_hook(action)
     end
 
     if caller_info.func == coroutine.yield then
-        if action == "return" then
+        if action ~= "return" then
+            -- Context switch started.
+            thread_yield_times[current_thread] = time()
+        else
             -- Context switch complete.
+            local info
+            local top_info
+            i = 2
+            repeat
+                top_info = info
+                info = debug.getinfo(i,'nSf')
+                i = i + 1
+            until not info
 
+            LOG('Found coroutine top: '..top_info.what..' '.. (top_info.name or tostring(top_info.linedefined)))
+
+            current_thread = threads[top_info]
+            if not current_thread then
+                current_thread = thread_id_counter
+                thread_id_counter = thread_id_counter + 1
+                threads[top_info.func] = current_thread
+                thread_drifts[current_thread] = 0
+            else
+                thread_drifts[current_thread] = 
+                    thread_drifts[current_thread] + 
+                    time() - thread_yield_times[current_thread]
+            end
         end
         return
     end
@@ -62,9 +88,10 @@ local function _profiler_hook(action)
 
     -- Insert a traceview-ish record for this event into the output buffer.
     -- Linked-list used to further reduce overhead. Muwhaha.
+    table.insert(recordBuffer, current_thread)
     table.insert(recordBuffer, methodId)
     table.insert(recordBuffer, actionCode)
-    table.insert(recordBuffer, eventTime)
+    table.insert(recordBuffer, eventTime - thread_drifts[current_thread])
 end
 
 function Start()
@@ -74,6 +101,8 @@ function Start()
 
 	LOG('Starting profiler at ' .. tostring(time()))
 
+    current_thread = 1
+    thread_drifts[current_thread] = 0
     startTime = time()
 	debug.sethook(_profiler_hook, 'cr')
     running = true
@@ -83,7 +112,7 @@ function Stop()
     running = false
     debug.sethook(nil)
 
-    WARN("Stopped profiler after at " .. tostring(time() - startTime))
+    WARN("Stopped profiler after " .. tostring(time() - startTime))
     -- Remove the references to func objects: this kills the Sync table.
     local stringMethodMap = {}
     for k, v in methodMap do
@@ -165,7 +194,7 @@ function SendReport(report)
     local length = table.getn(report.outputBuffer)
 
     -- Convert timestamps to integers.
-    for i = 3, length, 3 do
+    for i = 4, length, 4 do
         v[i] = math.floor((v[i] - report.startTime) * 1000000)
     end
 

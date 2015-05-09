@@ -39,11 +39,13 @@ local function _profiler_hook(action)
     end
 
     if caller_info.func == coroutine.yield then
-        for i = 1, 64 do
+
+        for i = -64, 64 do
+            local info = debug.getinfo(2)
+
             local k, v = debug.getlocal(2, i)
             if k then
-                WARN('coroutine.yield locals: '..k..' = '..tostring(v))
-                break
+                WARN((info.name or info.what) .. ' locals: '..k..' = '..tostring(v))
             end
         end
 

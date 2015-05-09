@@ -56,7 +56,7 @@ local function _profiler_hook(action)
             -- Context switch complete.
             local info
             local top_info
-            i = 2
+            local i = 2
             repeat
                 top_info = info
                 info = debug.getinfo(i,'nSf')

@@ -22,7 +22,7 @@ local function _profiler_hook(action)
 
     -- Since we can obtain the 'function' for the item we've had call us, we
     -- can use that...
-    local caller_info = debug.getinfo(2, 'nS')
+    local caller_info = debug.getinfo(2, 'nSf')
 
     -- Don't profile the profiler.
     if blacklist[caller_info.func] then

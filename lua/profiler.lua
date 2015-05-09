@@ -2,8 +2,6 @@
 
 local running = false
 
-local time = GetSystemTimeSecondsOnlyForProfileUse
-
 local methodMap = {}
 local methodInfoMap = {}
 local methodIdCounter = 0
@@ -12,8 +10,9 @@ local recordBuffer = {}
 local startTime
 
 -- Avoid profiling the profiler
-local blacklist = {
-}
+local blacklist = { }
+
+local time = nil
 
 local function _profiler_hook(action)
     local eventTime = time()
@@ -52,6 +51,10 @@ local function _profiler_hook(action)
 end
 
 function Start()
+    -- Fairly hacky, but these need to be sim-side
+    time = GetSystemTimeSecondsOnlyForProfileUse
+    blacklist[GetSystemTimeSecondsOnlyForProfileUse] = true
+
 	LOG('Starting profiler at ' .. tostring(time()))
 
     startTime = time()
@@ -100,7 +103,7 @@ function PrettyName(func)
 end
 
 function CreateProgressBar()
-    local Popup = import('/lua/ui/controls/popups/popup.lua').Popup
+    local Popup = import('/mods/profiler/lua/popup.lua').Popup
     local Group = import('/lua/maui/group.lua').Group
     local StatusBar = import('/lua/maui/statusbar.lua').StatusBar
     local LayoutHelpers = import('/lua/maui/layouthelpers.lua')
@@ -189,6 +192,5 @@ blacklist[Stop] = true
 blacklist[_profiler_hook] = true
 blacklist[SendReport] = true
 blacklist[PrettyName] = true
-blacklist[GetSystemTimeSecondsOnlyForProfileUse] = true
 blacklist[debug.sethook] = true
 blacklist[debug.getinfo] = true

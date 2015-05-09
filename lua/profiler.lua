@@ -53,9 +53,9 @@ local function _profiler_hook(action)
                 i = i + 1
             until not info
 
-            LOG('Found coroutine top: '..top_info.what..' '.. (top_info.name or tostring(top_info.linedefined)))
+            -- LOG('Found coroutine top: '..top_info.what..' '.. (top_info.name or tostring(top_info.linedefined)))
 
-            current_thread = threads[top_info]
+            current_thread = threads[top_info.func]
             if not current_thread then
                 current_thread = thread_id_counter
                 thread_id_counter = thread_id_counter + 1

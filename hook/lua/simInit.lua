@@ -1,4 +1,3 @@
-
 local baseBeginSession = BeginSession
 function BeginSession()
 	baseBeginSession()

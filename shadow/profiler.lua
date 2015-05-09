@@ -1,50 +1,80 @@
-
 -- This is the lua profiler
 
 local running = false
 
 local time = GetSystemTimeSecondsOnlyForProfileUse
 
-local start_time = 0
-local stop_time  = 0
-local methodId_counter = 1
-local methodIds = {}
 local report = {}
 
+local methodMap = {}
+local methodInfoMap = {}
+local methodIdCounter = 0
+local outputBuffer = {}
+
+local startTime
+
+-- Avoid profiling the profiler
+local blacklist = {
+}
+
 local function _profiler_hook(event)
+    local eventTime = time()
+    -- Output format:
+    -- Method id, Method action, delta since start.
 
-	local func_info = debug.getinfo(2, 'nS')
+    -- Find or generate function id for this function.
 
-	local thread_id = 1
+    -- Since we can obtain the 'function' for the item we've had call us, we
+    -- can use that...
+    local caller_info = debug.getinfo(2, 'nS')
 
+    -- Don't profile the profiler.
+    if blacklist[caller_info.func] then
+        return
+    end
 
-	local methodId = methods[func_info.func]
-	if not methodId then
-		methodId = methodId_counter
-		methods[func_info.func] = methodId
-		methodId_counter = methodId_counter + 1
-	end
+    local methodId = methodMap[caller_info.func]
+    if not methodId then
+        methodId = methodIdCounter + 1
+        methodIdCounter = methodId
+        methodMap[caller_info.func] = methodId
+        methodInfoMap[caller_info.func] = caller_info
+    end
 
-	-- action: Call = 0, Return = 1
-	local action = (event != 'return') and 0 or 1
+    -- 0 for call, 1 for return, as per traceview.
+    local actionCode = 1
+    if action ~= "return" then
+        actionCode = 0
+    end
 
-	local time_delta = (time() - start_time) * 1000000
-
+    -- Insert a traceview-ish record for this event into the output buffer.
+    -- Linked-list used to further reduce overhead. Muwhaha.
+    table.insert(outputBuffer, methodId)
+    table.insert(outputBuffer, actionCode)
+    table.insert(outputBuffer, eventTime)
 end
 
 function Start()
-
 	LOG('Starting profiler at '+tostring(time()))
 
+    startTime = time()
 	debug.sethook(_profiler_hook, 'cr')
-
-	start_time = time()
 end
 
 function Stop()
-	stop_time = time()
+    WARN("Stopped profiler after at " + tostring(time() - startTime))
+    -- Remove the references to func objects: this kills the Sync table.
+    local stringMethodMap = {}
+    for k, v in methodMap do
+        stringMethodMap[v] = PrettyName(methodInfoMap[k])
+    end
 
-	Sync.profilerReport = report
+    -- Add output to sync table.
+    Sync.profilerReport = {
+        methodMap = stringMethodMap,
+        outputBuffer = outputBuffer,
+        startTime = startTime
+    }
 end
 
 function Toggle()
@@ -64,6 +94,81 @@ local function PrettyName(funcInfo)
 	return source, string.format(FORMAT_FUNCNAME, line, name)
 end
 
-function SendReport()
 
+-- Write the profile... to the preferences file. Sanity not included.
+function SendReport(report)
+    local Popup = import('/lua/ui/controls/popups/popup.lua').Popup
+    local Group = import('/lua/maui/group.lua').Group
+    local StatusBar = import('/lua/maui/statusbar.lua').StatusBar
+    local LayoutHelpers = import('/lua/maui/layouthelpers.lua')
+    local UIUtil = import('/lua/ui/uiutil.lua')
+    WARN("Writing profiler output (this may take some time)")
+
+    local dialogContent = Group(GetFrame(0))
+    dialogContent.Width:Set(600)
+    dialogContent.Height:Set(100)
+
+    GpgNetSend('FOpen', 1, 'keyfile.dat')
+    -- Fire the name map at GpgNet.
+    for k, v in report.methodMap do
+        -- k is a method-info record, v is the associated identifier.
+        GpgNetSend('FWrite', 1, k, v)
+    end
+    GpgNetSend('FClose', 1)
+
+    GpgNetSend('FOpen', 2, 'profile.dat')
+
+    local v = report.outputBuffer
+
+    -- Fire the profiler records at GpgNet
+    local length = table.getn(report.outputBuffer)
+
+    Popup(GetFrame(0), dialogContent)
+
+    local progressBar = StatusBar(dialogContent, 0, 100, false, false,
+        UIUtil.UIFile('/game/resource-mini-bars/mini-energy-bar-back_bmp.dds'),
+        UIUtil.UIFile('/game/resource-mini-bars/mini-energy-bar_bmp.dds'), false)
+
+    LayoutHelpers.AtCenterIn(progressBar, dialogContent)
+
+    -- Convert timestamps to integers.
+    for i = 3, length, 3 do
+        v[i] = math.floor((v[i] - report.startTime) * 1000000)
+    end
+
+    local i = 1
+
+    local lastProgress = 0
+
+    while i < length - 12 do
+        GpgNetSend('FWrite', 2,
+            v[i], v[i + 1], v[i + 2],
+            v[i + 3], v[i + 4], v[i + 5],
+            v[i + 6], v[i + 7], v[i + 8],
+            v[i + 9], v[i + 10], v[i + 11]
+        )
+
+        i = i + 12
+
+        if lastProgress < math.floor(i / (length / 100)) then
+            lastProgress = lastProgress + 1
+            progressBar:SetValue(lastProgress)
+            WaitSeconds(0)
+        end
+    end
+
+    for i = i, length do
+        GpgNetSend('FWrite', 2, v[i])
+    end
+
+    GpgNetSend('FClose', 2)
+
+    WARN("Output complete")
 end
+
+blacklist[Start] = true
+blacklist[Stop] = true
+blacklist[_profiler_hook] = true
+blacklist[SendReport] = true
+blacklist[PrettyName] = true
+blacklist[GetSystemTimeSecondsOnlyForProfileUse] = true

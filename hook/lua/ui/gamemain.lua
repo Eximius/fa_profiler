@@ -1,4 +1,3 @@
-
 local baseOnFirstUpdate = OnFirstUpdate
 function OnFirstUpdate()
 	if not CheatsEnabled() then

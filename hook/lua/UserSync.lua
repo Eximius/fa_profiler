@@ -1,4 +1,3 @@
-
 local baseOnSync = OnSync
 function OnSync()
 	baseOnSync()

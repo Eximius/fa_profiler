@@ -1,5 +1,6 @@
 local baseBeginSession = BeginSession
 function BeginSession()
 	baseBeginSession()
-	import('/mods/profiler/lua/profiler.lua').Start()
+	local Profiler = import('/mods/profiler/lua/profiler.lua')
+	Profiler.Start()
 end

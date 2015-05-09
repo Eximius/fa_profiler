@@ -2,10 +2,10 @@
 
 local running = false
 
-local methodMap = {}
-local methodInfoMap = {}
-local methodIdCounter = 0
-local recordBuffer = {}
+local methodMap
+local methodInfoMap
+local methodIdCounter
+local recordBuffer
 
 local startTime
 
@@ -13,14 +13,28 @@ local startTime
 local blacklist = {}
 
 -- Maps toplevel functions to thread identifiers.
-local threads = {}
-local thread_id_counter = 2
+local threads
+local thread_id_counter
 
 -- Maps thread ids to clock drifts.
-local thread_drifts = {}
-local thread_yield_times = {}
+local thread_drifts
+local thread_yield_times
 
 local current_thread
+
+--- Used to reset the profiler state for a new run.
+function Reset()
+    methodMap = {}
+    methodInfoMap = {}
+    methodIdCounter = 0
+    recordBuffer = {}
+
+    threads = {}
+    thread_id_counter = 2
+
+    thread_drifts = {}
+    thread_yield_times = {}
+end
 
 local time = nil
 
@@ -120,16 +134,7 @@ function Start()
     running = true
 
     -- Reinitialize all data structures so we can be reused.
-    methodMap = {}
-    methodInfoMap = {}
-    methodIdCounter = 0
-    recordBuffer = {}
-
-    threads = {}
-    thread_id_counter = 2
-
-    thread_drifts = {}
-    thread_yield_times = {}
+    Reset()
 
     -- Fairly hacky, but these need to be sim-side
     time = GetSystemTimeSecondsOnlyForProfileUse
@@ -162,16 +167,7 @@ function Stop()
     }
 
     -- Clean up so we don't use unnecessary memory.
-    methodMap = {}
-    methodInfoMap = {}
-    methodIdCounter = 0
-    recordBuffer = {}
-
-    threads = {}
-    thread_id_counter = 2
-
-    thread_drifts = {}
-    thread_yield_times = {}
+    Reset()
 end
 
 function Toggle()

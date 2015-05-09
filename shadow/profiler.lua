@@ -4,12 +4,10 @@ local running = false
 
 local time = GetSystemTimeSecondsOnlyForProfileUse
 
-local report = {}
-
 local methodMap = {}
 local methodInfoMap = {}
 local methodIdCounter = 0
-local outputBuffer = {}
+local recordBuffer = {}
 
 local startTime
 
@@ -17,12 +15,10 @@ local startTime
 local blacklist = {
 }
 
-local function _profiler_hook(event)
+local function _profiler_hook(action)
     local eventTime = time()
     -- Output format:
     -- Method id, Method action, delta since start.
-
-    -- Find or generate function id for this function.
 
     -- Since we can obtain the 'function' for the item we've had call us, we
     -- can use that...
@@ -33,6 +29,7 @@ local function _profiler_hook(event)
         return
     end
 
+    -- Find or generate function id for this function.
     local methodId = methodMap[caller_info.func]
     if not methodId then
         methodId = methodIdCounter + 1
@@ -49,9 +46,9 @@ local function _profiler_hook(event)
 
     -- Insert a traceview-ish record for this event into the output buffer.
     -- Linked-list used to further reduce overhead. Muwhaha.
-    table.insert(outputBuffer, methodId)
-    table.insert(outputBuffer, actionCode)
-    table.insert(outputBuffer, eventTime)
+    table.insert(recordBuffer, methodId)
+    table.insert(recordBuffer, actionCode)
+    table.insert(recordBuffer, eventTime)
 end
 
 function Start()
@@ -62,6 +59,8 @@ function Start()
 end
 
 function Stop()
+    debug.sethook(nil)
+
     WARN("Stopped profiler after at " + tostring(time() - startTime))
     -- Remove the references to func objects: this kills the Sync table.
     local stringMethodMap = {}
@@ -72,7 +71,7 @@ function Stop()
     -- Add output to sync table.
     Sync.profilerReport = {
         methodMap = stringMethodMap,
-        outputBuffer = outputBuffer,
+        outputBuffer = recordBuffer,
         startTime = startTime
     }
 end
@@ -85,28 +84,44 @@ function Toggle()
 	end
 end
 
-FORMAT_FUNCNAME = 'L%03d:%s'
-local function PrettyName(funcInfo)
-	local name = funcInfo.name or 'anonymous'
-	local source = funcInfo.short_src or funcInfo.namewhat
-	local line = funcInfo.linedefined
+local FORMAT_FUNCNAME = '%s	L%03d:%s'
+local function PrettyName(func)
+    local className
+    if func.what == "C" then
+        className = "Native"
+    else
+        className = func.short_src or "?"
+    end
 
-	return source, string.format(FORMAT_FUNCNAME, line, name)
+    -- Return className followed by the name and line number
+    return string.format(FORMAT_FUNCNAME, className, func.linedefined, func.name or "anonymous")
 end
 
-
--- Write the profile... to the preferences file. Sanity not included.
-function SendReport(report)
+function CreateProgressBar()
     local Popup = import('/lua/ui/controls/popups/popup.lua').Popup
     local Group = import('/lua/maui/group.lua').Group
     local StatusBar = import('/lua/maui/statusbar.lua').StatusBar
     local LayoutHelpers = import('/lua/maui/layouthelpers.lua')
     local UIUtil = import('/lua/ui/uiutil.lua')
-    WARN("Writing profiler output (this may take some time)")
 
     local dialogContent = Group(GetFrame(0))
     dialogContent.Width:Set(600)
     dialogContent.Height:Set(100)
+
+    Popup(GetFrame(0), dialogContent)
+
+    local progressBar = StatusBar(dialogContent, 0, 100, false, false,
+        UIUtil.UIFile('/game/resource-mini-bars/mini-energy-bar-back_bmp.dds'),
+        UIUtil.UIFile('/game/resource-mini-bars/mini-energy-bar_bmp.dds'), false)
+
+    LayoutHelpers.AtCenterIn(progressBar, dialogContent)
+
+    return progressBar
+end
+
+-- Write the profile... to the preferences file. Sanity not included.
+function SendReport(report)
+    WARN("Writing profiler output (this may take some time)")
 
     GpgNetSend('FOpen', 1, 'keyfile.dat')
     -- Fire the name map at GpgNet.
@@ -123,22 +138,14 @@ function SendReport(report)
     -- Fire the profiler records at GpgNet
     local length = table.getn(report.outputBuffer)
 
-    Popup(GetFrame(0), dialogContent)
-
-    local progressBar = StatusBar(dialogContent, 0, 100, false, false,
-        UIUtil.UIFile('/game/resource-mini-bars/mini-energy-bar-back_bmp.dds'),
-        UIUtil.UIFile('/game/resource-mini-bars/mini-energy-bar_bmp.dds'), false)
-
-    LayoutHelpers.AtCenterIn(progressBar, dialogContent)
-
     -- Convert timestamps to integers.
     for i = 3, length, 3 do
         v[i] = math.floor((v[i] - report.startTime) * 1000000)
     end
 
     local i = 1
-
     local lastProgress = 0
+    local progressBar = CreateProgressBar()
 
     while i < length - 12 do
         GpgNetSend('FWrite', 2,

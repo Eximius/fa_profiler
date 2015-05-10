@@ -76,11 +76,11 @@ local function _profiler_hook(action)
     end
 
     if caller_info.func == coroutine.yield then
-        if action ~= "return" then
+        if action == 'call' then
             -- Context switch started.
             thread_yield_times[current_thread] = eventTime
             current_thread = nil
-        else
+        else -- if action == 'return' or action == 'tail return' then
             -- Context switch complete.
             local info
             local top_info
@@ -304,14 +304,18 @@ function SendReport(report)
 
 end
 
-blacklist[Start] = true
-blacklist[Stop] = true
+-- Blacklist self
 blacklist[_profiler_hook] = true
-blacklist[SendReport] = true
-blacklist[PrettyName] = true
 blacklist[debug.sethook] = true
 blacklist[debug.getinfo] = true
-blacklist[Toggle] = true
 
+blacklist[Start] = true
+blacklist[Stop] = true
+blacklist[Toggle] = true
 blacklist[InitCurrentThread] = true
 blacklist[PutRecord] = true
+
+-- Native functions
+blacklist[next] = true
+blacklist[type] = true
+blacklist[table.getn] = true

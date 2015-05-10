@@ -20,7 +20,7 @@ local thread_id_counter
 local thread_drifts
 local thread_yield_times
 local thread_yield_junk
-local thread_tail_calls
+local thread_stacks
 
 local current_thread
 
@@ -37,6 +37,7 @@ function Reset()
     thread_drifts = {}
     thread_yield_times = {}
     thread_yield_junk = false
+    thread_stacks = {}
 end
 
 local function InitCurrentThread(thread_top_func_info)
@@ -44,6 +45,7 @@ local function InitCurrentThread(thread_top_func_info)
     thread_id_counter = thread_id_counter + 1
     threads[thread_top_func_info.func] = current_thread
     thread_drifts[current_thread] = 0
+    thread_stacks[current_thread] = {}
 end
 
 local function PutRecord(thread_id, method_id, action, event_time)
@@ -102,7 +104,7 @@ local function _profiler_hook(action)
                     thread_drifts[current_thread] + 
                     eventTime - thread_yield_times[current_thread]
             end
-            thread_yield_junk = true
+            --thread_yield_junk = true
         end
         return
     end
@@ -113,8 +115,18 @@ local function _profiler_hook(action)
 
     if not current_thread then
         -- Assume thread was just started
-        InitCurrentThread(caller_info)
+        local info
+        local top_info
+        local i = 2
+        repeat
+            top_info = info
+            info = debug.getinfo(i,'nSf')
+            i = i + 1
+        until not info
+        InitCurrentThread(top_info)
     end
+
+    local thread_stack = thread_stacks[current_thread]
 
     -- Find or generate function id for this function.
     local methodId = methodMap[caller_info.func]
@@ -127,14 +139,19 @@ local function _profiler_hook(action)
 
     eventTime = eventTime - thread_drifts[current_thread]
     if action == 'call' then
+        table.insert(thread_stack, methodId)
         PutRecord(current_thread, methodId, 0, eventTime)
     elseif action == 'return' or action == 'tail return' then
+        if table.getn(thread_stack) > 0 then
+            methodId = table.remove(thread_stack)
+        end
         PutRecord(current_thread, methodId, 1, eventTime)
-
-        if current_thread == 1 and not debug.getinfo(3) then
-            -- Special case main terminating
+        if not debug.getinfo(3) then
+            -- Thread terminating
             current_thread = nil
         end
+    else
+        WARN('Unknown action: '..action)
     end
 end
 

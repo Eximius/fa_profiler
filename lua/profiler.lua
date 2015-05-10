@@ -40,16 +40,28 @@ function Reset()
     thread_stacks = {}
 end
 
-local function InitCurrentThread(thread_top_func_info)
+local function InitCurrentThread(thread_handle)
     current_thread = thread_id_counter
     thread_id_counter = thread_id_counter + 1
-    threads[thread_top_func_info.func] = current_thread
+    threads[thread_handle] = current_thread
     thread_drifts[current_thread] = 0
     thread_stacks[current_thread] = {}
 end
 
-local function PutRecord(thread_id, method_id, action, event_time)
-    table.insert(recordBuffer, thread_id)
+local function GetCurrentThreadId()
+    local status, err = pcall(CurrentThread)
+    if status then
+        current_thread = threads[err]
+        if not current_thread then
+            InitCurrentThread(err)
+        end
+    else
+        current_thread = 1
+    end
+end
+
+local function PutRecord(method_id, action, event_time)
+    table.insert(recordBuffer, current_thread)
     table.insert(recordBuffer, method_id)
     table.insert(recordBuffer, action)
     table.insert(recordBuffer, event_time)
@@ -58,10 +70,6 @@ end
 local time = nil
 
 local function _profiler_hook(action)
-    if thread_yield_junk then
-        thread_yield_junk = false
-        return
-    end
     local eventTime = time()
     -- Output format:
     -- Method id, Method action, delta since start.
@@ -75,57 +83,7 @@ local function _profiler_hook(action)
         return
     end
 
-    if caller_info.func == coroutine.yield then
-        if action == 'call' then
-            -- Context switch started.
-            thread_yield_times[current_thread] = eventTime
-            current_thread = nil
-        else -- if action == 'return' or action == 'tail return' then
-            -- Context switch complete.
-            local info
-            local top_info
-            local i = 2
-            repeat
-                top_info = info
-                info = debug.getinfo(i,'nSf')
-                i = i + 1
-            until not info
-
-            -- LOG('Found coroutine top: '..top_info.what..' '.. (top_info.name or tostring(top_info.linedefined)))
-
-            current_thread = threads[top_info.func]
-            if not current_thread then
-                InitCurrentThread(top_info)
-            else
-                if not thread_yield_times[current_thread] then
-                    WARN('BAD THREAD: '..tostring(current_thread))
-                end
-                thread_drifts[current_thread] = 
-                    thread_drifts[current_thread] + 
-                    eventTime - thread_yield_times[current_thread]
-            end
-            --thread_yield_junk = true
-        end
-        return
-    end
-
-    if caller_info.func == coroutine.resume then
-        WARN('Coroutine resume called by '..tostring(current_thread))
-    end
-
-    if not current_thread then
-        -- Assume thread was just started
-        local info
-        local top_info
-        local i = 2
-        repeat
-            top_info = info
-            info = debug.getinfo(i,'nSf')
-            i = i + 1
-        until not info
-        InitCurrentThread(top_info)
-    end
-
+    GetCurrentThreadId()
     local thread_stack = thread_stacks[current_thread]
 
     -- Find or generate function id for this function.
@@ -137,18 +95,13 @@ local function _profiler_hook(action)
         methodInfoMap[caller_info.func] = caller_info
     end
 
-    eventTime = eventTime - thread_drifts[current_thread]
     if action == 'call' then
         table.insert(thread_stack, methodId)
-        PutRecord(current_thread, methodId, 0, eventTime)
+        PutRecord(methodId, 0, eventTime)
     elseif action == 'return' or action == 'tail return' then
         if table.getn(thread_stack) > 0 then
             methodId = table.remove(thread_stack)
-        end
-        PutRecord(current_thread, methodId, 1, eventTime)
-        if not debug.getinfo(3) then
-            -- Thread terminating
-            current_thread = nil
+            PutRecord(methodId, 1, eventTime)
         end
     else
         WARN('Unknown action: '..action)
@@ -172,7 +125,7 @@ function Start()
 
 	LOG('Starting profiler at ' .. tostring(time()))
 
-    InitCurrentThread({name = 'main', func = 'main'})
+    InitCurrentThread('main')
     startTime = time()
 
 	debug.sethook(_profiler_hook, 'cr')
@@ -314,8 +267,11 @@ blacklist[Stop] = true
 blacklist[Toggle] = true
 blacklist[InitCurrentThread] = true
 blacklist[PutRecord] = true
+blacklist[GetCurrentThreadId] = true
 
 -- Native functions
 blacklist[next] = true
 blacklist[type] = true
 blacklist[table.getn] = true
+blacklist[coroutine.yield] = true
+blacklist[coroutine.resume] = true

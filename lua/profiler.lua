@@ -161,13 +161,23 @@ function Toggle()
 	end
 end
 
-local FORMAT_FUNCNAME = '%s	L%03d:%s'
+local FORMAT_FUNCNAME = '%s\tL%03d:%s'
 function PrettyName(func)
     local className
     if func.what == "C" then
-        className = "Native"
+        return "Native\t"..( func.name or '?' )
     else
-        className = func.short_src or "?"
+        local src = func.source
+        if src then
+            local crap_pos = src:find('\\lua')
+            if crap_pos then
+                className = src:sub(crap_pos):gsub('\\','/')
+            else
+                className = src
+            end
+        else
+            className = '?'
+        end
     end
 
     -- Return className followed by the name and line number

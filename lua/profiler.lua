@@ -19,10 +19,11 @@ local thread_id_counter
 -- Maps thread ids to clock drifts.
 local thread_drifts
 local thread_yield_times
-local thread_yield_junk
 local thread_stacks
 
 local current_thread
+
+local global_drift
 
 --- Used to reset the profiler state for a new run.
 function Reset()
@@ -36,8 +37,9 @@ function Reset()
 
     thread_drifts = {}
     thread_yield_times = {}
-    thread_yield_junk = false
     thread_stacks = {}
+
+    global_drift = 0
 end
 
 local function InitCurrentThread(thread_handle)
@@ -48,7 +50,7 @@ local function InitCurrentThread(thread_handle)
     thread_stacks[current_thread] = {}
 end
 
-local function GetCurrentThreadId()
+local function ResolveCurrentThreadId()
     local status, err = pcall(CurrentThread)
     if status then
         current_thread = threads[err]
@@ -64,6 +66,7 @@ local function PutRecord(method_id, action, event_time)
     table.insert(recordBuffer, current_thread)
     table.insert(recordBuffer, method_id)
     table.insert(recordBuffer, action)
+    table.insert(recordBuffer, event_time - thread_drifts[current_thread])
     table.insert(recordBuffer, event_time)
 end
 
@@ -83,7 +86,19 @@ local function _profiler_hook(action)
         return
     end
 
-    GetCurrentThreadId()
+    ResolveCurrentThreadId()
+
+    if caller_info.func == coroutine.yield then
+        if action == 'call' then
+            thread_yield_times[current_thread] = eventTime
+        else
+            thread_drifts[current_thread] =
+                thread_drifts[current_thread] + eventTime - thread_yield_times[current_thread]
+        end
+        global_drift = global_drift + time() - eventTime
+        return
+    end
+
     local thread_stack = thread_stacks[current_thread]
 
     -- Find or generate function id for this function.
@@ -106,6 +121,7 @@ local function _profiler_hook(action)
     else
         WARN('Unknown action: '..action)
     end
+    global_drift = global_drift + time() - eventTime
 end
 
 function Start()
@@ -146,7 +162,8 @@ function Stop()
     Sync.profilerReport = {
         methodMap = stringMethodMap,
         outputBuffer = recordBuffer,
-        startTime = startTime
+        startTime = startTime,
+        global_drift = global_drift
     }
 
     -- Clean up so we don't use unnecessary memory.
@@ -212,7 +229,8 @@ end
 
 -- Write the profile... to the preferences file. Sanity not included.
 function SendReport(report)
-    WARN("Writing profiler output (this may take some time)")
+    LOG("Writing profiler output (this may take some time)")
+    LOG('Profiler global_drift: '..tostring(report.global_drift))
 
     GpgNetSend('FOpen', 1, 'keyfile.dat')
     -- Fire the name map at GpgNet.
@@ -230,8 +248,9 @@ function SendReport(report)
     local length = table.getn(report.outputBuffer)
 
     -- Convert timestamps to integers.
-    for i = 4, length, 4 do
+    for i = 4, length, 5 do
         v[i] = math.floor((v[i] - report.startTime) * 1000000)
+        v[i+1] = math.floor((v[i+1] - report.startTime) * 1000000)
     end
 
     local i = 1
@@ -263,7 +282,7 @@ function SendReport(report)
 
     progressGroup:Destroy()
 
-    WARN("Output complete")
+    LOG("Output complete")
 
 end
 
@@ -277,11 +296,10 @@ blacklist[Stop] = true
 blacklist[Toggle] = true
 blacklist[InitCurrentThread] = true
 blacklist[PutRecord] = true
-blacklist[GetCurrentThreadId] = true
+blacklist[ResolveCurrentThreadId] = true
 
 -- Native functions
 blacklist[next] = true
 blacklist[type] = true
 blacklist[table.getn] = true
-blacklist[coroutine.yield] = true
 blacklist[coroutine.resume] = true

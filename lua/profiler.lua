@@ -48,6 +48,7 @@ local function InitCurrentThread(thread_handle)
     threads[thread_handle] = current_thread
     thread_drifts[current_thread] = 0
     thread_stacks[current_thread] = {}
+    thread_yield_times[current_thread] = 0
 end
 
 local function ResolveCurrentThreadId()
@@ -124,6 +125,18 @@ local function _profiler_hook(action)
     global_drift = global_drift + time() - eventTime
 end
 
+local function DontRunOutOfMemory()
+    while running do
+        local length = table.getn(recordBuffer)
+        if length > 1000000 then
+            LOG('Profiler: Chunked at '..tostring(length / 5)..' records.')
+            Sync.profilerChunk = recordBuffer
+            recordBuffer = {}
+        end
+        WaitTicks(20)
+    end
+end
+
 function Start()
     if running then
         WARN('Profiler already running.')
@@ -144,7 +157,11 @@ function Start()
     InitCurrentThread('main')
     startTime = time()
 
+    Sync.profilerStarted = startTime
+
 	debug.sethook(_profiler_hook, 'cr')
+
+    ForkThread(DontRunOutOfMemory)
 end
 
 function Stop()
@@ -158,10 +175,10 @@ function Stop()
         stringMethodMap[v] = PrettyName(methodInfoMap[k])
     end
 
+    Sync.profilerChunk = recordBuffer
     -- Add output to sync table.
     Sync.profilerReport = {
         methodMap = stringMethodMap,
-        outputBuffer = recordBuffer,
         startTime = startTime,
         global_drift = global_drift
     }
@@ -209,7 +226,7 @@ function CreateProgressBar()
 
     local group = Group(GetFrame(0), 'Profiler')
 
-    local title = UIUtil.CreateText(group, "Dumping profiler data.", 24)
+    local title = UIUtil.CreateText(group, "Streaming profiler data.", 24)
     LayoutHelpers.AtTopIn(title, GetFrame(0), 100)
     LayoutHelpers.AtHorizontalCenterIn(title, GetFrame(0))
 
@@ -227,10 +244,87 @@ function CreateProgressBar()
     return group, progressBar
 end
 
--- Write the profile... to the preferences file. Sanity not included.
+local profile_send_report_thread
+local profile_sender
+local profiler_chunks = {}
+
+local profile_length = 0
+local profile_written = 0
+
+local function ProfileSender()
+    GpgNetSend('FOpen', 2, 'profile.dat')
+
+    -- Show stream progress
+    local lastProgress = 0
+    local progressGroup, progressBar = CreateProgressBar()
+
+    local last_chunk_checked
+    while true do
+        local continue_length_check
+        for _, chunk in profiler_chunks do
+            if chunk == last_chunk_checked then
+                continue_length_check = true
+            elseif continue_length_check then
+                profile_length = profile_length + table.getn(chunk)
+            end
+        end
+        last_chunk_checked = profiler_chunks[table.getn(profiler_chunks)]
+
+        if table.getn(profiler_chunks) > 0 then
+            local chunk = table.remove(profiler_chunks)
+            local length = table.getn(chunk)
+            local v = chunk
+
+            LOG('Profiler: sending '..tostring(length / 5)..' records.')
+
+                -- Convert timestamps to integers.
+            for i = 4, length, 5 do
+                v[i] = math.floor((v[i] - startTime) * 1000000)
+                v[i+1] = math.floor((v[i+1] - startTime) * 1000000)
+            end
+
+            local i = 1
+            while i < length - 12 do
+                GpgNetSend('FWrite', 2,
+                    v[i], v[i + 1], v[i + 2],
+                    v[i + 3], v[i + 4], v[i + 5],
+                    v[i + 6], v[i + 7], v[i + 8],
+                    v[i + 9], v[i + 10], v[i + 11]
+                )
+
+                i = i + 12
+                profile_written = profile_written + 12
+            end
+
+            for i = i, length do
+                GpgNetSend('FWrite', 2, v[i])
+            end
+        end
+        if profile_send_report_thread and table.getn(profiler_chunks) == 0 then
+            break
+        end
+        progressBar:SetValue(math.floor(profile_written / (profile_length / 300)))
+
+        WaitSeconds(2)
+    end
+    ResumeThread(profile_send_report_thread)
+    progressGroup:Destroy()
+end
+
+-- Send profile.dat chunk
+function SendChunk(chunk)
+    if not profile_sender then
+        profile_sender = ForkThread(ProfileSender)
+    end
+    table.insert(profiler_chunks, chunk)
+end
+
+-- Send/finish dumping profile data
 function SendReport(report)
     LOG("Writing profiler output (this may take some time)")
     LOG('Profiler global_drift: '..tostring(report.global_drift))
+
+    profile_send_report_thread = CurrentThread()
 
     GpgNetSend('FOpen', 1, 'keyfile.dat')
     -- Fire the name map at GpgNet.
@@ -240,50 +334,16 @@ function SendReport(report)
     end
     GpgNetSend('FClose', 1)
 
-    GpgNetSend('FOpen', 2, 'profile.dat')
-
-    local v = report.outputBuffer
-
-    -- Fire the profiler records at GpgNet
-    local length = table.getn(report.outputBuffer)
-
-    -- Convert timestamps to integers.
-    for i = 4, length, 5 do
-        v[i] = math.floor((v[i] - report.startTime) * 1000000)
-        v[i+1] = math.floor((v[i+1] - report.startTime) * 1000000)
-    end
-
-    local i = 1
-    local lastProgress = 0
-    local progressGroup, progressBar = CreateProgressBar()
-
-    while i < length - 12 do
-        GpgNetSend('FWrite', 2,
-            v[i], v[i + 1], v[i + 2],
-            v[i + 3], v[i + 4], v[i + 5],
-            v[i + 6], v[i + 7], v[i + 8],
-            v[i + 9], v[i + 10], v[i + 11]
-        )
-
-        i = i + 12
-
-        if lastProgress < math.floor(i / (length / 300)) then
-            lastProgress = lastProgress + 1
-            progressBar:SetValue(lastProgress)
-            WaitSeconds(0)
-        end
-    end
-
-    for i = i, length do
-        GpgNetSend('FWrite', 2, v[i])
-    end
+    SuspendCurrentThread()
 
     GpgNetSend('FClose', 2)
 
-    progressGroup:Destroy()
-
     LOG("Output complete")
 
+end
+
+function UIProfilerStarted(time_start)
+    startTime = time_start
 end
 
 -- Blacklist self

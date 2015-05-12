@@ -3,7 +3,6 @@
 local running = false
 
 local methodMap
-local methodInfoMap
 local methodIdCounter
 local recordBuffer
 
@@ -11,6 +10,9 @@ local startTime
 
 -- Avoid profiling the profiler
 local blacklist = {}
+
+-- Yielding function set
+local yielding = {}
 
 -- Maps toplevel functions to thread identifiers.
 local threads
@@ -28,7 +30,6 @@ local global_drift
 --- Used to reset the profiler state for a new run.
 function Reset()
     methodMap = {}
-    methodInfoMap = {}
     methodIdCounter = 0
     recordBuffer = {}
 
@@ -74,22 +75,26 @@ end
 local time = nil
 
 local function _profiler_hook(action)
-    local eventTime = time()
-    -- Output format:
-    -- Method id, Method action, delta since start.
-
-    -- Since we can obtain the 'function' for the item we've had call us, we
-    -- can use that...
-    local caller_info = debug.getinfo(2, 'nSf')
+    local func = debug.getinfo(2, 'f').func
 
     -- Don't profile the profiler.
-    if blacklist[caller_info.func] then
+    if blacklist[func] then
         return
     end
 
-    ResolveCurrentThreadId()
+    local eventTime = time()
 
-    if caller_info.func == coroutine.yield then
+    local status, err = pcall(CurrentThread)
+    if status then
+        current_thread = threads[err]
+        if not current_thread then
+            InitCurrentThread(err)
+        end
+    else
+        current_thread = 1
+    end
+
+    if yielding[func] then
         if action == 'call' then
             thread_yield_times[current_thread] = eventTime
         else
@@ -103,24 +108,21 @@ local function _profiler_hook(action)
     local thread_stack = thread_stacks[current_thread]
 
     -- Find or generate function id for this function.
-    local methodId = methodMap[caller_info.func]
+    local methodId = methodMap[func]
     if not methodId then
         methodId = methodIdCounter + 1
         methodIdCounter = methodId
-        methodMap[caller_info.func] = methodId
-        methodInfoMap[caller_info.func] = caller_info
+        methodMap[func] = methodId
     end
 
     if action == 'call' then
         table.insert(thread_stack, methodId)
         PutRecord(methodId, 0, eventTime)
-    elseif action == 'return' or action == 'tail return' then
+    else --if action == 'return' or action == 'tail return' then
         if table.getn(thread_stack) > 0 then
             methodId = table.remove(thread_stack)
             PutRecord(methodId, 1, eventTime)
         end
-    else
-        WARN('Unknown action: '..action)
     end
     global_drift = global_drift + time() - eventTime
 end
@@ -171,8 +173,8 @@ function Stop()
     WARN("Stopped profiler after " .. tostring(time() - startTime))
     -- Remove the references to func objects: this kills the Sync table.
     local stringMethodMap = {}
-    for k, v in methodMap do
-        stringMethodMap[v] = PrettyName(methodInfoMap[k])
+    for func, k in methodMap do
+        stringMethodMap[k] = PrettyName(debug.getinfo(func))
     end
 
     Sync.profilerChunk = recordBuffer
@@ -359,7 +361,30 @@ blacklist[PutRecord] = true
 blacklist[ResolveCurrentThreadId] = true
 
 -- Native functions
+local blacklist_libs = {
+    string, math, table
+}
+for _, lib in moho do
+    table.insert(blacklist_libs, lib)
+end
+
+for _, lib in blacklist_libs do
+    for _, func in lib do
+        blacklist[func] = true
+    end
+end
+
 blacklist[next] = true
 blacklist[type] = true
-blacklist[table.getn] = true
-blacklist[coroutine.resume] = true
+blacklist[unpack] = true
+blacklist[ipairs] = true
+blacklist[assert] = true
+blacklist[setmetatable] = true
+blacklist[getmetatable] = true
+
+-- Yielding functions
+yielding[coroutine.yield] = true
+yielding[WaitSeconds] = true
+yielding[WaitFor] = true
+yielding[SuspendCurrentThread] = true
+yielding[coroutine.resume] = true
